@@ -6,43 +6,35 @@ from datetime import datetime, timezone
 import pandas as pd
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-
-# --- EMAIL LIBRARIES (Emulating your code) ---
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 
 # --- CONFIGURATION ---
-# Secrets from GitHub
-API_ID = os.environ.get("TG_API_ID")
-API_HASH = os.environ.get("TG_API_HASH")
-SESSION_STRING = os.environ.get("TG_SESSION_STRING")
+API_ID = os.environ["TG_API_ID"]
+API_HASH = os.environ["TG_API_HASH"]
+SESSION_STRING = os.environ["TG_SESSION_STRING"]
 
-# Email Config (Matching your naming convention)
-SENDER_EMAIL = os.environ.get("EMAIL_USER")       # Your Gmail
-SENDER_APP_PASSWORD = os.environ.get("EMAIL_PASS") # Your Gmail App Password
-
-# Recipient List
+# Email Config
+SENDER_EMAIL = os.environ["EMAIL_USER"]
+SENDER_PASS = os.environ["EMAIL_PASS"]
 MY_EMAILS = ["youssef.bouhaik@studio.unibo.it"]
 
 TARGET_GROUP = "FragranceDealsSA" 
 CUTOFF_DATE = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
-# --- PARSING LOGIC ---
+# --- PARSING ---
 def parse_message(text):
     if not text: return None
-    # Filter: Must follow the group template
     if "اسم العطر" not in text or "السعر" not in text:
         return None
 
     try:
         data = {}
-        # Extract Name
         name_match = re.search(r"اسم العطر\s*[:\-.]\s*(.*)", text)
         data['Fragrance'] = name_match.group(1).strip() if name_match else "Unknown"
         
-        # Extract Price (Digits only)
         price_match = re.search(r"السعر.*[:\-.]\s*(\d+)", text)
         data['Price'] = int(price_match.group(1)) if price_match else 0
         
@@ -51,20 +43,17 @@ def parse_message(text):
     except:
         return None
 
-# --- EMAIL LOGIC (Emulating your provided code) ---
+# --- EMAIL LOGIC ---
 def send_email_report(file_path, highlights, total_count):
     print(f"🚀 Sending email to {len(MY_EMAILS)} recipients...")
     
     msg = MIMEMultipart()
-    
     date_str = datetime.now().strftime("%Y-%m-%d")
-    subject = f"Daily Fragrance: {TARGET_GROUP} ({date_str})"
     
     msg['From'] = SENDER_EMAIL
-    msg['Subject'] = subject
+    msg['Subject'] = f"Daily Fragrance: {TARGET_GROUP} ({date_str})"
     msg['To'] = ", ".join(MY_EMAILS)
     
-    # Body Text Logic
     if total_count > 0:
         news_text = f"Found {total_count} listings since Jan 1, 2026.\n\nTop 5 Latest:\n"
         for i, item in enumerate(highlights[:5], 1):
@@ -73,16 +62,11 @@ def send_email_report(file_path, highlights, total_count):
     else:
         news_text = "meh, meh, meh, No fragrance news for today, sorry!"
 
-    full_body = f"""howdy!, here are the latest fragrance news, in the case there are any
-
-{news_text}
-
-automated telegram script, by u$$ef"""
+    full_body = f"howdy!, here are the latest fragrance news, in the case there are any\n\n{news_text}\n\nautomated telegram script, by u$$ef"
 
     msg.attach(MIMEText(full_body, 'plain'))
 
-    # Attach Excel (Only if data exists)
-    if total_count > 0 and file_path:
+    if total_count > 0 and file_path and os.path.exists(file_path):
         try:
             with open(file_path, "rb") as attachment:
                 part = MIMEBase("application", "octet-stream")
@@ -97,21 +81,17 @@ automated telegram script, by u$$ef"""
         except Exception as e:
             print(f"⚠️ Could not attach file: {e}")
 
-    # Send via Gmail
     try:
         server = smtplib.SMTP('smtp.gmail.com', 587)
         server.starttls()
-        server.login(SENDER_EMAIL, SENDER_APP_PASSWORD)
-        
-        # sendmail expects list, not string
+        server.login(SENDER_EMAIL, SENDER_PASS)
         server.sendmail(SENDER_EMAIL, MY_EMAILS, msg.as_string())
-        
         server.quit()
         print("✅ DONE! Email sent successfully.")
     except Exception as e:
         print(f"❌ Email Error: {e}")
 
-# --- MAIN EXECUTION ---
+# --- MAIN ---
 async def main():
     print("--- Starting Search ---")
     async with TelegramClient(StringSession(SESSION_STRING), int(API_ID), API_HASH) as client:
@@ -135,7 +115,6 @@ async def main():
                     parsed['Date'] = message.date.strftime("%Y-%m-%d")
                     valid_posts.append(parsed)
 
-        # Generate Excel if data found
         output_file = None
         if valid_posts:
             print(f"✅ Found {len(valid_posts)} items. Creating Excel...")
@@ -164,7 +143,6 @@ async def main():
 
             writer.close()
         
-        # Always send email, even if empty (prints "meh, meh, meh")
         send_email_report(output_file, valid_posts, len(valid_posts))
 
 if __name__ == "__main__":
