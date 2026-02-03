@@ -1,71 +1,117 @@
 import os
-import json
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime
+import sys
+import asyncio
+import re
+import traceback
+from datetime import datetime, timezone
+import pandas as pd
+from telethon import TelegramClient
+from telethon.sessions import StringSession
 
 # --- CONFIGURATION ---
-SHEET_NAME = "Fragrance Data"  # The exact name of your Google Sheet
-# ---------------------
+API_ID = os.environ.get("TG_API_ID")
+API_HASH = os.environ.get("TG_API_HASH")
+SESSION_STRING = os.environ.get("TG_SESSION_STRING")
 
-def get_google_sheet():
-    """Authenticates with Google and returns the sheet object."""
+TARGET_GROUP = "FragranceDealsSA"
+# Scan from NOW back to Jan 1, 2026
+CUTOFF_DATE = datetime(2026, 1, 15, tzinfo=timezone.utc)
+
+# Crash prevention
+if not API_ID:
+    print("❌ ERROR: API_ID is missing. Check GitHub Secrets.")
+    sys.exit(1)
+
+os.makedirs("images", exist_ok=True)
+
+# --- PARSING LOGIC ---
+def parse_message(text):
+    if not text: return None
+    # Must have "Name" and "Price" in Arabic
+    if "اسم العطر" not in text or "السعر" not in text:
+        return None
     try:
-        # Define the scope of access
-        scope = [
-            "https://spreadsheets.google.com/feeds",
-            "https://www.googleapis.com/auth/drive"
-        ]
-
-        # Load the credentials from the GitHub Secret (environment variable)
-        creds_json = os.environ.get("GCP_CREDENTIALS")
+        data = {}
+        # Extract Name
+        name_match = re.search(r"اسم العطر\s*[:\-.]\s*(.*)", text)
+        data['Fragrance'] = name_match.group(1).strip() if name_match else "Unknown"
         
-        if not creds_json:
-            raise ValueError("GCP_CREDENTIALS not found in environment variables!")
-
-        # Parse the JSON string into a dictionary
-        creds_dict = json.loads(creds_json)
+        # Extract Price
+        price_match = re.search(r"السعر.*[:\-.]\s*(\d+)", text)
+        data['Price'] = int(price_match.group(1)) if price_match else 0
         
-        # Authenticate
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        client = gspread.authorize(creds)
-        
-        # Open the specific sheet
-        sheet = client.open(SHEET_NAME).sheet1
-        return sheet
-
-    except Exception as e:
-        print(f"Error connecting to Google Sheets: {e}")
+        data['Full_Text'] = text
+        return data
+    except:
         return None
 
-def main():
-    # 1. Connect to Google Sheets first to ensure connection works
-    sheet = get_google_sheet()
-    if not sheet:
-        return  # Stop if we can't connect
+# --- MAIN SCRIPT ---
+async def main():
+    print("--- 🟢 STARTING SCRAPE (NO EMAIL) ---")
+    async with TelegramClient(StringSession(SESSION_STRING), int(API_ID), API_HASH) as client:
+        
+        valid_posts = []
+        print(f"⏳ Scanning backwards until {CUTOFF_DATE.date()}...")
+        
+        async for message in client.iter_messages(TARGET_GROUP):
+            # Stop if older than Jan 1, 2026
+            if message.date < CUTOFF_DATE:
+                print("🛑 Reached Jan 1, 2026. Stopping.")
+                break
 
-    # 2. YOUR EXISTING SCRAPING LOGIC HERE
-    # Let's say you scraped a fragrance and have these variables:
-    # name = "Dior Sauvage"
-    # price = "$120"
-    # stock_status = "In Stock"
-    # url = "https://example.com/dior"
-    
-    # (Example data for testing)
-    scraped_data = [
-        datetime.now().strftime("%Y-%m-%d %H:%M:%S"), # Timestamp
-        "Dior Sauvage",
-        "$120",
-        "In Stock",
-        "https://example.com/dior"
-    ]
+            if message.text:
+                parsed = parse_message(message.text)
+                if parsed:
+                    image_path = None
+                    if message.photo:
+                        try:
+                            # Save image to folder
+                            path = await message.download_media(file="images/")
+                            image_path = path
+                        except: pass 
+                    
+                    parsed['Image_Path'] = image_path
+                    parsed['Date'] = message.date.strftime("%Y-%m-%d")
+                    valid_posts.append(parsed)
 
-    # 3. Append the data to the Google Sheet
-    try:
-        sheet.append_row(scraped_data)
-        print(f"Successfully added row: {scraped_data[1]}")
-    except Exception as e:
-        print(f"Failed to append row: {e}")
+        if valid_posts:
+            print(f"✅ Found {len(valid_posts)} items. Creating Excel...")
+            output_file = 'fragrance_history.xlsx'
+            
+            df = pd.DataFrame(valid_posts)
+            # Reorder columns
+            cols = ['Image_Path', 'Date', 'Fragrance', 'Price', 'Full_Text']
+            df = df[cols]
+
+            # Create Excel with Images
+            writer = pd.ExcelWriter(output_file, engine='xlsxwriter')
+            df.to_excel(writer, sheet_name='History', index=False)
+            
+            workbook = writer.book
+            worksheet = writer.sheets['History']
+            worksheet.set_column('A:A', 20) # Image col width
+            worksheet.set_column('B:E', 25) # Text col width
+            
+            for index, row in df.iterrows():
+                row_num = index + 1
+                img_path = row['Image_Path']
+                worksheet.set_row(row_num, 100) # Row height
+                
+                if img_path and os.path.exists(img_path):
+                    try:
+                        worksheet.insert_image(row_num, 0, img_path, {'x_scale': 0.1, 'y_scale': 0.1, 'object_position': 1})
+                    except: pass
+                else:
+                    worksheet.write(row_num, 0, "No Image")
+
+            writer.close()
+            print(f"🎉 SUCCESS! Saved to {output_file}. Go to Artifacts to download.")
+        else:
+            print("❌ No items found.")
 
 if __name__ == "__main__":
-    main()
+    try:
+        asyncio.run(main())
+    except Exception:
+        print(traceback.format_exc())
+        sys.exit(1)
