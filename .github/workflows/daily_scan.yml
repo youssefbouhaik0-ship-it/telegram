@@ -2,23 +2,23 @@ name: Daily Fragrance Scanner
 
 on:
   schedule:
-    - cron: '0 8 * * *' # Remember this is 08:00 UTC
+    - cron: '0 8 * * *'
   workflow_dispatch:
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
-    timeout-minutes: 15  # Prevents the job from getting stuck forever
+    timeout-minutes: 15
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4  # Updated to v4
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5 # Updated to v5
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
-          cache: 'pip' # Logic to cache pip dependencies automatically
+          python-version: '3.10' # Updated to 3.10 to fix the warning
+          cache: 'pip'
 
       - name: Install Dependencies
         run: pip install -r requirements.txt
@@ -28,6 +28,14 @@ jobs:
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
-          EMAIL_USER: ${{ secrets.EMAIL_USER }}
-          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
         run: python scraper.py
+
+      # --- THIS IS THE MISSING PIECE ---
+      - name: Upload Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: fragrance-data
+          path: |
+            fragrance_history.xlsx
+            images/
+          if-no-files-found: warn
