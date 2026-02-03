@@ -13,7 +13,7 @@ API_ID = os.environ.get("TG_API_ID")
 API_HASH = os.environ.get("TG_API_HASH")
 SESSION_STRING = os.environ.get("TG_SESSION_STRING")
 
-TARGET_GROUP = "FragranceDealsSA"
+TARGET_GROUP = "alm_alator"
 # Scan from NOW back to Jan 1, 2026
 CUTOFF_DATE = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
