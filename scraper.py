@@ -15,7 +15,7 @@ SESSION_STRING = os.environ.get("TG_SESSION_STRING")
 
 TARGET_GROUP = "alm_alator"
 # Scan from NOW back to Jan 1, 2026
-CUTOFF_DATE = datetime(2026, 1, 15, tzinfo=timezone.utc)
+CUTOFF_DATE = datetime(2026, 1, 25, tzinfo=timezone.utc)
 
 # Crash prevention
 if not API_ID:
