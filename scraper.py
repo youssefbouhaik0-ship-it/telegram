@@ -9,7 +9,7 @@ from telethon.sessions import StringSession
 API_ID = os.environ["TG_API_ID"]
 API_HASH = os.environ["TG_API_HASH"]
 SESSION_STRING = os.environ["TG_SESSION_STRING"]
-TARGET_GROUP = "FragranceDealsSA" # <--- REPLACE THIS with the real group username
+TARGET_GROUP = "alm_alator" 
 
 # 2. Parsing Function
 def parse_message(text):
