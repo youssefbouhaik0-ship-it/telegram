@@ -2,6 +2,7 @@ import os
 import asyncio
 import re
 import smtplib
+from datetime import datetime, timezone
 from email.message import EmailMessage
 import pandas as pd
 from telethon import TelegramClient
@@ -13,11 +14,15 @@ API_HASH = os.environ["TG_API_HASH"]
 SESSION_STRING = os.environ["TG_SESSION_STRING"]
 EMAIL_ADDR = os.environ["EMAIL_USER"]
 EMAIL_PASS = os.environ["EMAIL_PASS"]
-TARGET_GROUP = "FragranceDealsSA" # <--- CHECK THIS NAME!
+TARGET_GROUP = "alm_alator"
+
+# Date Cutoff: January 1, 2026
+CUTOFF_DATE = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 # --- PARSING LOGIC ---
 def parse_message(text):
     if not text: return None
+    # Filter: Must follow the group template
     if "اسم العطر" not in text or "السعر" not in text:
         return None
 
@@ -36,31 +41,38 @@ def parse_message(text):
     except:
         return None
 
-# --- EMAIL LOGIC ---
-def send_email(file_path, highlights):
+# --- EMAIL LOGIC (OFFICE 365 / UNIBO) ---
+def send_email(file_path, highlights, total_count):
     msg = EmailMessage()
-    msg['Subject'] = f"👃 Daily Fragrance Report - {len(highlights)} Items Found"
+    msg['Subject'] = f"👃 Historic Fragrance Report (Jan 2026) - {total_count} Items"
     msg['From'] = EMAIL_ADDR
-    msg['To'] = EMAIL_ADDR # Sending to yourself
+    msg['To'] = EMAIL_ADDR # Sends to your Unibo email
     
-    # Create the Body Text
-    body = "Here are the top 5 latest fragrance listings from the group:\n\n"
+    body = f"Here is the fragrance history from Jan 1, 2026 to today.\n\n"
+    body += f"Total Listings Found: {total_count}\n\n"
+    body += "Top 5 Latest Listings:\n"
     for i, item in enumerate(highlights[:5], 1):
         body += f"{i}. {item['Fragrance']} - {item['Price']} SAR\n"
     
-    body += "\nSee the attached Excel file for photos and full details."
+    body += "\nSee attached Excel file for images."
     msg.set_content(body)
 
     # Attach Excel
     with open(file_path, 'rb') as f:
         file_data = f.read()
-        msg.add_attachment(file_data, maintype='application', subtype='xlsx', filename='fragrance_report.xlsx')
+        msg.add_attachment(file_data, maintype='application', subtype='xlsx', filename='fragrance_history.xlsx')
 
-    # Send
-    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-        smtp.login(EMAIL_ADDR, EMAIL_PASS)
-        smtp.send_message(msg)
-    print("📧 Email sent successfully!")
+    print("🔌 Connecting to Office 365 Server...")
+    try:
+        # UPDATED: Using Office 365 Server Settings
+        with smtplib.SMTP('smtp.office365.com', 587) as smtp:
+            smtp.ehlo()
+            smtp.starttls() # Secure the connection
+            smtp.login(EMAIL_ADDR, EMAIL_PASS)
+            smtp.send_message(msg)
+        print("✅ Email sent successfully to " + EMAIL_ADDR)
+    except Exception as e:
+        print(f"❌ Email Failed: {e}")
 
 # --- MAIN SCRIPT ---
 async def main():
@@ -68,17 +80,22 @@ async def main():
     async with TelegramClient(StringSession(SESSION_STRING), int(API_ID), API_HASH) as client:
         
         valid_posts = []
+        print(f"⏳ Scanning backwards until {CUTOFF_DATE.date()}...")
         
-        print(f"Scanning {TARGET_GROUP}...")
-        # Scan last 3000 messages
-        async for message in client.iter_messages(TARGET_GROUP, limit=3000):
+        # Scan messages backwards
+        async for message in client.iter_messages(TARGET_GROUP):
+            
+            # Stop if we reach 2025
+            if message.date < CUTOFF_DATE:
+                print("🛑 Reached Jan 1, 2026. Stopping.")
+                break
+
             if message.text:
                 parsed = parse_message(message.text)
                 if parsed:
-                    # Download Photo if available
+                    # Download Photo
                     image_path = None
                     if message.photo:
-                        # Save to a folder named 'images'
                         path = await message.download_media(file=f"images/{message.id}")
                         image_path = path
                     
@@ -87,45 +104,37 @@ async def main():
                     valid_posts.append(parsed)
 
         if not valid_posts:
-            print("❌ No valid posts found.")
+            print("❌ No posts found.")
             return
 
         print(f"✅ Found {len(valid_posts)} items. Creating Excel...")
 
-        # --- CREATE EXCEL WITH IMAGES ---
+        # Create Excel
         df = pd.DataFrame(valid_posts)
-        # Reorder columns to put Image first
         cols = ['Image_Path', 'Date', 'Fragrance', 'Price', 'Full_Text']
         df = df[cols]
 
-        writer = pd.ExcelWriter('fragrance_report.xlsx', engine='xlsxwriter')
-        df.to_excel(writer, sheet_name='Deals', index=False)
+        output_file = 'fragrance_history.xlsx'
+        writer = pd.ExcelWriter(output_file, engine='xlsxwriter')
+        df.to_excel(writer, sheet_name='History', index=False)
         
-        workbook = writer.book
-        worksheet = writer.sheets['Deals']
-
-        # Formatting
-        worksheet.set_column('A:A', 20) # Width for Image column
-        worksheet.set_column('B:E', 25) # Width for text columns
+        worksheet = writer.sheets['History']
+        worksheet.set_column('A:A', 20)
+        worksheet.set_column('B:E', 25)
         
-        # Loop through rows to insert images
         for index, row in df.iterrows():
-            row_num = index + 1 # +1 because header is row 0
+            row_num = index + 1
             img_path = row['Image_Path']
-            
+            worksheet.set_row(row_num, 100)
             if img_path and os.path.exists(img_path):
-                # Set row height to fit image
-                worksheet.set_row(row_num, 100)
-                # Insert image into Column A (Scale down to fit)
                 worksheet.insert_image(row_num, 0, img_path, {'x_scale': 0.1, 'y_scale': 0.1, 'object_position': 1})
             else:
                 worksheet.write(row_num, 0, "No Image")
 
         writer.close()
         
-        # --- SEND EMAIL ---
-        print("Sending Email...")
-        send_email('fragrance_report.xlsx', valid_posts)
+        # Send Email
+        send_email(output_file, valid_posts, len(valid_posts))
 
 if __name__ == "__main__":
     asyncio.run(main())
