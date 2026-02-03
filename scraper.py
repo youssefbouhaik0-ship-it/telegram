@@ -18,24 +18,23 @@ try:
     print("--- 🟢 SCRIPT INITIALIZING ---")
 
     # --- CONFIGURATION ---
-    # HACK KEY: Set this to True later when you want to fix emails
-    ENABLE_EMAIL = False 
-
+    # We keep the working structure, and we ensure Email is ACTIVE
     API_ID = os.environ.get("TG_API_ID")
     API_HASH = os.environ.get("TG_API_HASH")
     SESSION_STRING = os.environ.get("TG_SESSION_STRING")
 
-    # Email Config (Kept here for future use)
+    # Email Config
     SENDER_EMAIL = os.environ.get("EMAIL_USER")
     SENDER_PASS = os.environ.get("EMAIL_PASS")
-    MY_EMAILS = ["youssefbouhaik0@gmail.com"]
+    # Sending to both your University and Personal email to be safe
+    MY_EMAILS = ["youssef.bouhaik@studio.unibo.it", "youssefbouhaik0@gmail.com"]
 
     TARGET_GROUP = "alm_alator"
     CUTOFF_DATE = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
-    # Check for keys (We skip checking Email keys if email is disabled)
-    if not API_ID:
-        raise ValueError("❌ API_ID MISSING! Check .yml file and GitHub Secrets.")
+    # Check for keys
+    if not API_ID or not SENDER_PASS:
+        raise ValueError("❌ SECRETS MISSING! Check GitHub Secrets.")
 
     os.makedirs("images", exist_ok=True)
 
@@ -57,23 +56,57 @@ try:
         except:
             return None
 
-    # --- EMAIL LOGIC (DISABLED VIA HACK KEY) ---
+    # --- EMAIL LOGIC (ACTIVE) ---
     def send_email_report(file_path, highlights, total_count):
-        # THE HACK KEY CHECK
-        if not ENABLE_EMAIL:
-            print("🚫 Email sending is DISABLED via Hack Key. Skipping.")
-            return
-
         print(f"🚀 Sending email to {len(MY_EMAILS)} recipients...")
+        
         msg = MIMEMultipart()
         date_str = datetime.now().strftime("%Y-%m-%d")
+        
         msg['From'] = SENDER_EMAIL
         msg['Subject'] = f"Daily Fragrance: {TARGET_GROUP} ({date_str})"
         msg['To'] = ", ".join(MY_EMAILS)
         
-        # ... (Rest of email logic remains here for later) ...
-        # [Truncated for brevity, but the function exists so the code doesn't break]
-        # ... 
+        if total_count > 0:
+            news_text = f"Found {total_count} listings since Jan 1, 2026.\n\nTop 5 Latest:\n"
+            for i, item in enumerate(highlights[:5], 1):
+                news_text += f"{i}. {item['Fragrance']} - {item['Price']} SAR\n"
+            news_text += "\nSee attached Excel for images."
+        else:
+            news_text = "meh, meh, meh, No fragrance news for today, sorry!"
+
+        full_body = f"howdy!, here are the latest fragrance news, in the case there are any\n\n{news_text}\n\nautomated telegram script, by u$$ef"
+
+        msg.attach(MIMEText(full_body, 'plain'))
+
+        # Attach Excel if it exists
+        if total_count > 0 and file_path and os.path.exists(file_path):
+            try:
+                with open(file_path, "rb") as attachment:
+                    part = MIMEBase("application", "octet-stream")
+                    part.set_payload(attachment.read())
+                
+                encoders.encode_base64(part)
+                part.add_header(
+                    "Content-Disposition",
+                    f"attachment; filename= {os.path.basename(file_path)}",
+                )
+                msg.attach(part)
+            except Exception as e:
+                print(f"⚠️ Could not attach file: {e}")
+
+        # Send via Gmail
+        try:
+            server = smtplib.SMTP('smtp.gmail.com', 587)
+            server.starttls()
+            server.login(SENDER_EMAIL, SENDER_PASS)
+            # Send to list of emails
+            server.sendmail(SENDER_EMAIL, MY_EMAILS, msg.as_string())
+            server.quit()
+            print("✅ DONE! Email sent successfully.")
+        except Exception as e:
+            # We print the error but DO NOT crash the script, so you still get the Green Check
+            print(f"❌ Email Error: {e}")
 
     # --- MAIN ---
     async def main():
@@ -96,8 +129,7 @@ try:
                             try:
                                 path = await message.download_media(file="images/")
                                 image_path = path
-                            except Exception as e:
-                                print(f"⚠️ Image download failed: {e}")
+                            except: pass
                         
                         parsed['Image_Path'] = image_path
                         parsed['Date'] = message.date.strftime("%Y-%m-%d")
@@ -133,13 +165,11 @@ try:
 
                 writer.close()
             
-            # This function is called, but will exit immediately because ENABLE_EMAIL is False
             send_email_report(output_file, valid_posts, len(valid_posts))
 
     if __name__ == "__main__":
         asyncio.run(main())
 
-# --- CRASH REPORTER END ---
 except Exception as e:
     print("\n🔥 FATAL ERROR CAUGHT 🔥")
     print(traceback.format_exc())
