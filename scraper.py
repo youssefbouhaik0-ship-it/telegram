@@ -22,7 +22,7 @@ SENDER_PASS = os.environ["EMAIL_PASS"]
 # The recipient is fixed to your Unibo address
 MY_EMAILS = ["youssef.bouhaik@studio.unibo.it"]
 
-TARGET_GROUP = "FragranceDealsSA" 
+TARGET_GROUP = "alm_alator" 
 CUTOFF_DATE = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 # --- PARSING ---
