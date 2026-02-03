@@ -3,20 +3,30 @@ import asyncio
 import re
 import smtplib
 from datetime import datetime, timezone
-from email.message import EmailMessage
 import pandas as pd
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
-# --- CONFIGURATION ---
-API_ID = os.environ["TG_API_ID"]
-API_HASH = os.environ["TG_API_HASH"]
-SESSION_STRING = os.environ["TG_SESSION_STRING"]
-EMAIL_ADDR = os.environ["EMAIL_USER"]
-EMAIL_PASS = os.environ["EMAIL_PASS"]
-TARGET_GROUP = "alm_alator"
+# --- EMAIL LIBRARIES (Emulating your code) ---
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 
-# Date Cutoff: January 1, 2026
+# --- CONFIGURATION ---
+# Secrets from GitHub
+API_ID = os.environ.get("TG_API_ID")
+API_HASH = os.environ.get("TG_API_HASH")
+SESSION_STRING = os.environ.get("TG_SESSION_STRING")
+
+# Email Config (Matching your naming convention)
+SENDER_EMAIL = os.environ.get("EMAIL_USER")       # Your Gmail
+SENDER_APP_PASSWORD = os.environ.get("EMAIL_PASS") # Your Gmail App Password
+
+# Recipient List
+MY_EMAILS = ["youssef.bouhaik@studio.unibo.it"]
+
+TARGET_GROUP = "FragranceDealsSA" 
 CUTOFF_DATE = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 # --- PARSING LOGIC ---
@@ -41,59 +51,81 @@ def parse_message(text):
     except:
         return None
 
-# --- EMAIL LOGIC (OFFICE 365 / UNIBO) ---
-def send_email(file_path, highlights, total_count):
-    msg = EmailMessage()
-    msg['Subject'] = f"👃 Historic Fragrance Report (Jan 2026) - {total_count} Items"
-    msg['From'] = EMAIL_ADDR
-    msg['To'] = EMAIL_ADDR # Sends to your Unibo email
+# --- EMAIL LOGIC (Emulating your provided code) ---
+def send_email_report(file_path, highlights, total_count):
+    print(f"🚀 Sending email to {len(MY_EMAILS)} recipients...")
     
-    body = f"Here is the fragrance history from Jan 1, 2026 to today.\n\n"
-    body += f"Total Listings Found: {total_count}\n\n"
-    body += "Top 5 Latest Listings:\n"
-    for i, item in enumerate(highlights[:5], 1):
-        body += f"{i}. {item['Fragrance']} - {item['Price']} SAR\n"
+    msg = MIMEMultipart()
     
-    body += "\nSee attached Excel file for images."
-    msg.set_content(body)
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    subject = f"Daily Fragrance: {TARGET_GROUP} ({date_str})"
+    
+    msg['From'] = SENDER_EMAIL
+    msg['Subject'] = subject
+    msg['To'] = ", ".join(MY_EMAILS)
+    
+    # Body Text Logic
+    if total_count > 0:
+        news_text = f"Found {total_count} listings since Jan 1, 2026.\n\nTop 5 Latest:\n"
+        for i, item in enumerate(highlights[:5], 1):
+            news_text += f"{i}. {item['Fragrance']} - {item['Price']} SAR\n"
+        news_text += "\nSee attached Excel for images."
+    else:
+        news_text = "meh, meh, meh, No fragrance news for today, sorry!"
 
-    # Attach Excel
-    with open(file_path, 'rb') as f:
-        file_data = f.read()
-        msg.add_attachment(file_data, maintype='application', subtype='xlsx', filename='fragrance_history.xlsx')
+    full_body = f"""howdy!, here are the latest fragrance news, in the case there are any
 
-    print("🔌 Connecting to Office 365 Server...")
+{news_text}
+
+automated telegram script, by u$$ef"""
+
+    msg.attach(MIMEText(full_body, 'plain'))
+
+    # Attach Excel (Only if data exists)
+    if total_count > 0 and file_path:
+        try:
+            with open(file_path, "rb") as attachment:
+                part = MIMEBase("application", "octet-stream")
+                part.set_payload(attachment.read())
+            
+            encoders.encode_base64(part)
+            part.add_header(
+                "Content-Disposition",
+                f"attachment; filename= {os.path.basename(file_path)}",
+            )
+            msg.attach(part)
+        except Exception as e:
+            print(f"⚠️ Could not attach file: {e}")
+
+    # Send via Gmail
     try:
-        # UPDATED: Using Office 365 Server Settings
-        with smtplib.SMTP('smtp.office365.com', 587) as smtp:
-            smtp.ehlo()
-            smtp.starttls() # Secure the connection
-            smtp.login(EMAIL_ADDR, EMAIL_PASS)
-            smtp.send_message(msg)
-        print("✅ Email sent successfully to " + EMAIL_ADDR)
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(SENDER_EMAIL, SENDER_APP_PASSWORD)
+        
+        # sendmail expects list, not string
+        server.sendmail(SENDER_EMAIL, MY_EMAILS, msg.as_string())
+        
+        server.quit()
+        print("✅ DONE! Email sent successfully.")
     except Exception as e:
-        print(f"❌ Email Failed: {e}")
+        print(f"❌ Email Error: {e}")
 
-# --- MAIN SCRIPT ---
+# --- MAIN EXECUTION ---
 async def main():
-    print("--- Connecting to Telegram ---")
+    print("--- Starting Search ---")
     async with TelegramClient(StringSession(SESSION_STRING), int(API_ID), API_HASH) as client:
         
         valid_posts = []
         print(f"⏳ Scanning backwards until {CUTOFF_DATE.date()}...")
         
-        # Scan messages backwards
         async for message in client.iter_messages(TARGET_GROUP):
-            
-            # Stop if we reach 2025
             if message.date < CUTOFF_DATE:
-                print("🛑 Reached Jan 1, 2026. Stopping.")
                 break
 
             if message.text:
                 parsed = parse_message(message.text)
                 if parsed:
-                    # Download Photo
                     image_path = None
                     if message.photo:
                         path = await message.download_media(file=f"images/{message.id}")
@@ -103,38 +135,37 @@ async def main():
                     parsed['Date'] = message.date.strftime("%Y-%m-%d")
                     valid_posts.append(parsed)
 
-        if not valid_posts:
-            print("❌ No posts found.")
-            return
+        # Generate Excel if data found
+        output_file = None
+        if valid_posts:
+            print(f"✅ Found {len(valid_posts)} items. Creating Excel...")
+            output_file = 'fragrance_history.xlsx'
+            
+            df = pd.DataFrame(valid_posts)
+            cols = ['Image_Path', 'Date', 'Fragrance', 'Price', 'Full_Text']
+            df = df[cols]
 
-        print(f"✅ Found {len(valid_posts)} items. Creating Excel...")
+            writer = pd.ExcelWriter(output_file, engine='xlsxwriter')
+            df.to_excel(writer, sheet_name='History', index=False)
+            
+            workbook = writer.book
+            worksheet = writer.sheets['History']
+            worksheet.set_column('A:A', 20)
+            worksheet.set_column('B:E', 25)
+            
+            for index, row in df.iterrows():
+                row_num = index + 1
+                img_path = row['Image_Path']
+                worksheet.set_row(row_num, 100)
+                if img_path and os.path.exists(img_path):
+                    worksheet.insert_image(row_num, 0, img_path, {'x_scale': 0.1, 'y_scale': 0.1, 'object_position': 1})
+                else:
+                    worksheet.write(row_num, 0, "No Image")
 
-        # Create Excel
-        df = pd.DataFrame(valid_posts)
-        cols = ['Image_Path', 'Date', 'Fragrance', 'Price', 'Full_Text']
-        df = df[cols]
-
-        output_file = 'fragrance_history.xlsx'
-        writer = pd.ExcelWriter(output_file, engine='xlsxwriter')
-        df.to_excel(writer, sheet_name='History', index=False)
+            writer.close()
         
-        worksheet = writer.sheets['History']
-        worksheet.set_column('A:A', 20)
-        worksheet.set_column('B:E', 25)
-        
-        for index, row in df.iterrows():
-            row_num = index + 1
-            img_path = row['Image_Path']
-            worksheet.set_row(row_num, 100)
-            if img_path and os.path.exists(img_path):
-                worksheet.insert_image(row_num, 0, img_path, {'x_scale': 0.1, 'y_scale': 0.1, 'object_position': 1})
-            else:
-                worksheet.write(row_num, 0, "No Image")
-
-        writer.close()
-        
-        # Send Email
-        send_email(output_file, valid_posts, len(valid_posts))
+        # Always send email, even if empty (prints "meh, meh, meh")
+        send_email_report(output_file, valid_posts, len(valid_posts))
 
 if __name__ == "__main__":
     asyncio.run(main())
